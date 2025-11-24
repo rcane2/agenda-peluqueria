@@ -1,194 +1,135 @@
-// Configuración de Firebase
-const firebaseConfig = {
-  apiKey: "AIzaSyCTCxO7DcQqRak48ns30iS87G_5_fY_ZAM",
-  authDomain: "agenda-peluqueria-ff6e3.firebaseapp.com",
-  projectId: "agenda-peluqueria-ff6e3",
-  storageBucket: "agenda-peluqueria-ff6e3.firebasestorage.app",
-  messagingSenderId: "613294168272",
-  appId: "1:613294168272:web:e477d1798c34481c3666d5",
-  measurementId: "G-C3ZM9KENHR"
-};
-
+// ==========================
 // Inicializar Firebase
+// ==========================
+const firebaseConfig = {
+  // ⚠️ Reemplaza con tu configuración real de Firebase
+  apiKey: "TU_API_KEY",
+  authDomain: "TU_AUTH_DOMAIN",
+  projectId: "TU_PROJECT_ID",
+};
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
-const citasRef = db.collection("citas");
 
-// Elementos
-const form = document.getElementById('citaForm');
-const lista = document.getElementById('listaCitas');
-const horaSelect = document.getElementById('hora');
-const fechaInput = document.getElementById('fecha');
-const estilistaInput = document.getElementById('estilista');
-const duracionInput = document.getElementById('duracion');
-const vacio = document.getElementById('vacio');
-const loginSection = document.getElementById('loginSection');
-const adminSection = document.getElementById('adminSection');
-const loginBtn = document.getElementById('loginBtn');
-const adminPass = document.getElementById('adminPass');
-const filtroEstilista = document.getElementById('filtroEstilista');
-const filtroFecha = document.getElementById('filtroFecha');
+// ==========================
+// Funciones de horarios
+// ==========================
+function cargarHorarios() {
+  const horaSelect = document.getElementById("hora");
+  horaSelect.innerHTML = ""; // limpiar
 
-const ADMIN_PASSWORD = "1234";
-let editId = null;
-let cacheCitas = [];
+  const horas = [
+    "09:00","09:30","10:00","10:30","11:00","11:30",
+    "12:00","12:30","13:00","13:30","14:00","14:30",
+    "15:00","15:30","16:00","16:30","17:00","17:30"
+  ];
 
-// Utilidades
-function timeToMinutes(hhmm) {
-  const [h, m] = hhmm.split(":").map(Number);
-  return h * 60 + m;
-}
-function generarHorarios() {
-  const horarios = [];
-  for (let h = 9; h <= 17; h++) {
-    horarios.push(`${String(h).padStart(2,"0")}:00`);
-    horarios.push(`${String(h).padStart(2,"0")}:30`);
-  }
-  return horarios;
-}
-
-// Actualizar horas disponibles
-function actualizarHoras() {
-  const fecha = fechaInput.value;
-  const estilista = estilistaInput.value;
-  const duracion = parseInt(duracionInput.value || "30", 10);
-
-  const ocupadas = (fecha && estilista)
-    ? cacheCitas.filter(c => c.fecha === fecha && c.estilista === estilista && c.id !== editId)
-    : [];
-
-  horaSelect.innerHTML = '<option value="">Selecciona…</option>';
-  generarHorarios().forEach(h => {
-    const inicio = timeToMinutes(h);
-    const fin = inicio + duracion;
-    const choca = ocupadas.some(c => {
-      const cInicio = timeToMinutes(c.hora);
-      const cFin = cInicio + parseInt(c.duracion, 10);
-      return inicio < cFin && cInicio < fin;
-    });
-    if (!choca) {
-      const opt = document.createElement("option");
-      opt.value = h;
-      opt.textContent = h;
-      horaSelect.appendChild(opt);
-    }
+  horas.forEach(h => {
+    const opt = document.createElement("option");
+    opt.value = h;
+    opt.textContent = h;
+    horaSelect.appendChild(opt);
   });
 }
 
-// Render agenda
-function renderAgenda() {
-  const filtroE = filtroEstilista.value;
-  const filtroF = filtroFecha.value;
+// Filtrar horarios ocupados
+async function filtrarHorarios() {
+  const fecha = document.getElementById("fecha").value;
+  const estilista = document.getElementById("estilista").value;
+  const horaSelect = document.getElementById("hora");
 
-  const filtradas = cacheCitas.filter(c => {
-    const matchE = filtroE ? c.estilista === filtroE : true;
-    const matchF = filtroF ? c.fecha === filtroF : true;
-    return matchE && matchF;
-  });
+  if (!fecha || !estilista) return;
 
-  lista.innerHTML = "";
-  vacio.style.display = filtradas.length ? "none" : "block";
+  // Traer citas de ese estilista en esa fecha
+  const snapshot = await db.collection("citas")
+    .where("fecha","==",fecha)
+    .where("estilista","==",estilista)
+    .get();
 
-  filtradas.forEach(c => {
-    const item = document.createElement("li");
-    item.className = "item";
-    item.innerHTML = `
-      <div>
-        <strong>${c.nombre}</strong> — ${c.fecha} ${c.hora}
-        <div class="meta">${c.estilista} • ${c.servicio} • ${c.duracion} min</div>
-      </div>
-      <div class="actions"></div>
-    `;
-    const actions = item.querySelector(".actions");
+  const ocupados = snapshot.docs.map(doc => doc.data().hora);
 
-    const btnEditar = document.createElement("button");
-    btnEditar.textContent = "Editar";
-    btnEditar.onclick = () => editarCita(c.id);
-
-    const btnEliminar = document.createElement("button");
-    btnEliminar.textContent = "Eliminar";
-    btnEliminar.className = "danger";
-    btnEliminar.onclick = () => eliminarCita(c.id);
-
-    actions.appendChild(btnEditar);
-    actions.appendChild(btnEliminar);
-    lista.appendChild(item);
+  // Deshabilitar opciones ocupadas
+  [...horaSelect.options].forEach(opt => {
+    opt.disabled = ocupados.includes(opt.value);
   });
 }
 
-// CRUD Firestore
-async function crearCita(data) {
-  await citasRef.add(data);
-}
-async function actualizarCita(id, data) {
-  await citasRef.doc(id).set(data, { merge: true });
-}
-async function eliminarCita(id) {
-  await citasRef.doc(id).delete();
-}
-function editarCita(id) {
-  const c = cacheCitas.find(x => x.id === id);
-  if (!c) return;
-  document.getElementById('nombre').value = c.nombre;
-  fechaInput.value = c.fecha;
-  estilistaInput.value = c.estilista;
-  document.getElementById('servicio').value = c.servicio;
-  duracionInput.value = c.duracion;
-  editId = id;
-  actualizarHoras();
-  horaSelect.value = c.hora;
-  window.scrollTo({ top: 0, behavior: "smooth" });
-}
-
-// Guardar cita
-form.addEventListener('submit', async e => {
+// ==========================
+// Reservar cita
+// ==========================
+document.getElementById("citaForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const nombre = document.getElementById('nombre').value.trim();
-  const fecha = fechaInput.value;
-  const estilista = estilistaInput.value;
-  const servicio = document.getElementById('servicio').value;
-  const duracion = duracionInput.value;
-  const hora = horaSelect.value;
 
-  if (!nombre || !fecha || !hora || !estilista || !servicio || !duracion) {
-    alert("Completa todos los campos");
-    return;
-  }
+  const nombre = document.getElementById("nombre").value;
+  const fecha = document.getElementById("fecha").value;
+  const estilista = document.getElementById("estilista").value;
+  const servicio = document.getElementById("servicio").value;
+  const duracion = document.getElementById("duracion").value;
+  const hora = document.getElementById("hora").value;
 
-  const data = { nombre, fecha, hora, estilista, servicio, duracion };
+  // Guardar en Firestore
+  await db.collection("citas").add({
+    nombre, fecha, estilista, servicio, duracion, hora
+  });
 
-  if (editId) {
-    await actualizarCita(editId, data);
-    editId = null;
-  } else {
-    await crearCita(data);
-  }
+  // Mensaje de confirmación
+  const mensaje = `✅ Reserva confirmada:\nCliente: ${nombre}\nFecha: ${fecha}\nHora: ${hora}\nEstilista: ${estilista}\nServicio: ${servicio}\nDuración: ${duracion} min`;
 
-  form.reset();
-  actualizarHoras();
+  alert(mensaje);
+
+  // Link para compartir por WhatsApp
+  const wpLink = `https://wa.me/?text=${encodeURIComponent(mensaje)}`;
+  window.open(wpLink, "_blank");
+
+  // Recargar horarios para que se deshabilite el recién reservado
+  filtrarHorarios();
 });
 
+// ==========================
 // Login administrador
-loginBtn.addEventListener("click", () => {
-  if (adminPass.value === ADMIN_PASSWORD) {
-    adminSection.style.display = "block";
-    loginSection.style.display = "none";
-    renderAgenda();
+// ==========================
+document.getElementById("loginBtn").addEventListener("click", () => {
+  const pass = document.getElementById("adminPass").value;
+  if (pass === "admin123") { // ⚠️ Cambia la contraseña
+    document.getElementById("adminSection").style.display = "block";
+    document.getElementById("loginSection").style.display = "none";
   } else {
     alert("Contraseña incorrecta");
   }
 });
 
-// Filtros
-filtroEstilista.addEventListener("change", renderAgenda);
-filtroFecha.addEventListener("change", renderAgenda);
+// ==========================
+// Mostrar agenda administrador
+// ==========================
+async function cargarAgenda() {
+  const filtroEstilista = document.getElementById("filtroEstilista").value;
+  const filtroFecha = document.getElementById("filtroFecha").value;
 
-// Suscripción en tiempo real a Firestore
-citasRef.onSnapshot(snapshot => {
-  cacheCitas = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-  renderAgenda();
-  actualizarHoras();
-});
+  let query = db.collection("citas");
+  if (filtroEstilista) query = query.where("estilista","==",filtroEstilista);
+  if (filtroFecha) query = query.where("fecha","==",filtroFecha);
 
+  const snapshot = await query.get();
+  const lista = document.getElementById("listaCitas");
+  const vacio = document.getElementById("vacio");
+
+  lista.innerHTML = "";
+  if (snapshot.empty) {
+    vacio.style.display = "block";
+  } else {
+    vacio.style.display = "none";
+    snapshot.forEach(doc => {
+      const c = doc.data();
+      const li = document.createElement("li");
+      li.textContent = `${c.fecha} ${c.hora} - ${c.nombre} (${c.servicio}) con ${c.estilista}`;
+      lista.appendChild(li);
+    });
+  }
+}
+
+document.getElementById("filtroEstilista").addEventListener("change", cargarAgenda);
+document.getElementById("filtroFecha").addEventListener("change", cargarAgenda);
+
+// ==========================
 // Inicialización
-actualizarHoras();
+// ==========================
+cargarHorarios();
